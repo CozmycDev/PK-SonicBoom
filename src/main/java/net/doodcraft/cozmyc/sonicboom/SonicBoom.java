@@ -11,44 +11,56 @@ import com.projectkorra.projectkorra.util.DamageHandler;
 import org.bukkit.Location;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
-import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 
 public class SonicBoom extends AirAbility implements AddonAbility {
 
-    @Attribute(Attribute.COOLDOWN)
-    private final long cooldown;
-
-    @Attribute(Attribute.DAMAGE)
-    private final double damage;
-
-    @Attribute(Attribute.RANGE)
-    private final double maxDistance;
-
-    @Attribute("TravelSpeed")
-    private final double travelSpeed;
-
-    @Attribute(Attribute.CHARGE_DURATION) // todo: double check this..
-    private int warmupTicks;
-
     private Location origin;
     private Vector direction;
-
     private boolean isWarmedup;
     private double currentDistance;
+
+    @Attribute(Attribute.COOLDOWN)
+    private final long cooldown;
+    @Attribute(Attribute.DAMAGE)
+    private final double damage;
+    @Attribute(Attribute.RANGE)
+    private final double maxDistance;
+    @Attribute(Attribute.KNOCKBACK)
+    private final double knockbackStrength;
+    @Attribute(Attribute.RADIUS)
+    private final double entityCollisionRadius;
+    @Attribute("TravelSpeed")
+    private final double travelSpeed;
+    @Attribute("NauseaTicks")
+    private final int nauseaDuration;
+    @Attribute("DarknessTicks")
+    private final int darknessDuration;
+    @Attribute("SwapWhileCharging")
+    private final boolean allowChargeSwapping;
+    @Attribute(Attribute.CHARGE_DURATION)
+    private int warmupTicks;
 
     public SonicBoom(Player player) {
         super(player);
 
+        this.cooldown = ConfigManager.defaultConfig.get().getLong("ExtraAbilities.Cozmyc.SonicBoom.Cooldown", 11000);
+        this.travelSpeed = ConfigManager.defaultConfig.get().getDouble("ExtraAbilities.Cozmyc.SonicBoom.TravelSpeed", 3.0);
+        this.damage = ConfigManager.defaultConfig.get().getDouble("ExtraAbilities.Cozmyc.SonicBoom.Damage", 7.0);
+        this.warmupTicks = ConfigManager.defaultConfig.get().getInt("ExtraAbilities.Cozmyc.SonicBoom.WarmupTicks", 40);
+        this.maxDistance = ConfigManager.defaultConfig.get().getInt("ExtraAbilities.Cozmyc.SonicBoom.Range", 32);
+        this.darknessDuration = ConfigManager.defaultConfig.get().getInt("ExtraAbilities.Cozmyc.SonicBoom.DarknessTicks", 80);
+        this.entityCollisionRadius = ConfigManager.defaultConfig.get().getDouble("ExtraAbilities.Cozmyc.SonicBoom.EntityCollisionRadius", 1.0);
+        this.knockbackStrength = ConfigManager.defaultConfig.get().getDouble("ExtraAbilities.Cozmyc.SonicBoom.KnockbackStrength", 3.5);
+        this.nauseaDuration = ConfigManager.defaultConfig.get().getInt("ExtraAbilities.Cozmyc.SonicBoom.NauseaTicks", 140);
+        this.allowChargeSwapping = ConfigManager.defaultConfig.get().getBoolean("ExtraAbilities.Cozmyc.SonicBoom.SwapWhileCharging", false);
+
         this.player = player;
         this.direction = player.getLocation().getDirection();
-        this.cooldown = ConfigManager.defaultConfig.get().getLong("ExtraAbilities.Cozmyc.SonicBoom.Cooldown", 10000);
-        this.travelSpeed = ConfigManager.defaultConfig.get().getDouble("ExtraAbilities.Cozmyc.SonicBoom.TravelSpeed", 2.0);
-        this.damage = ConfigManager.defaultConfig.get().getDouble("ExtraAbilities.Cozmyc.SonicBoom.Damage", 10.0);
-        this.warmupTicks = ConfigManager.defaultConfig.get().getInt("ExtraAbilities.Cozmyc.SonicBoom.WarmupTicks", 20);
-        this.maxDistance = ConfigManager.defaultConfig.get().getInt("ExtraAbilities.Cozmyc.SonicBoom.Range", 32);
         this.currentDistance = 0;
 
         if (!bPlayer.canBend(this) || CoreAbility.hasAbility(player, SonicBoom.class)) {
@@ -58,13 +70,18 @@ public class SonicBoom extends AirAbility implements AddonAbility {
         this.origin = player.getEyeLocation();
         this.isWarmedup = false;
 
+        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_WARDEN_SONIC_CHARGE, 1.2f, 1.0f);
+
         start();
     }
 
     @Override
     public void progress() {
-        if (!player.isSneaking()) {
+        CoreAbility boundAbility = bPlayer.getBoundAbility();
+
+        if (!player.isSneaking() || (!(boundAbility instanceof SonicBoom) && !allowChargeSwapping)) {
             remove();
+            bPlayer.addCooldown(this);
             return;
         }
 
@@ -74,11 +91,12 @@ public class SonicBoom extends AirAbility implements AddonAbility {
                 origin = player.getEyeLocation();
                 direction = player.getLocation().getDirection();
                 player.getWorld().playSound(player.getLocation(), Sound.ENTITY_WARDEN_SONIC_BOOM, 1.2f, 1.0f);
-            } else {
-                player.getWorld().playSound(player.getLocation(), Sound.ENTITY_WARDEN_SONIC_CHARGE, 1.2f, 1.0f);
+                player.getWorld().playSound(player.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 2.0f, 0.2f);
             }
             return;
         }
+
+        bPlayer.addCooldown(this);
 
         currentDistance += travelSpeed;
         if (currentDistance >= maxDistance) {
@@ -88,18 +106,29 @@ public class SonicBoom extends AirAbility implements AddonAbility {
 
         Location particleLocation = origin.clone().add(direction.clone().multiply(currentDistance));
         player.getWorld().spawnParticle(Particle.SONIC_BOOM, particleLocation, 1, 0.0, 0.0, 0.0, 0.01, null, true);
-        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_GHAST_SHOOT, 0.5f, 0.2f);
+        player.getWorld().spawnParticle(Particle.DUST_PLUME, particleLocation, 6, Math.random()/3, Math.random()/3, Math.random()/3, 0.03, null, true);
 
-        GeneralMethods.getEntitiesAroundPoint(particleLocation, 1).stream()
-                .filter(entity -> !(entity instanceof Player) && entity.getUniqueId() != player.getUniqueId())
-                .filter(entity -> entity instanceof LivingEntity)
-                .forEach(entity -> DamageHandler.damageEntity(entity, player, damage, this, false));
-    }
+        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_HORSE_BREATHE, 2.0f, 0.2f);
 
-    @Override
-    public void remove() {
-        bPlayer.addCooldown(this);
-        super.remove();
+        GeneralMethods.getEntitiesAroundPoint(particleLocation, entityCollisionRadius).stream()
+                .filter(entity -> entity.getUniqueId() != player.getUniqueId())
+                .forEach(entity -> {
+                    entity.setVelocity(direction.clone().normalize().multiply(knockbackStrength));
+
+                    if (entity instanceof LivingEntity) {
+                        DamageHandler.damageEntity(entity, player, damage, this, false);
+                    }
+
+                    if (entity instanceof Player affectedPlayer) {
+                        if (nauseaDuration > 0) {
+                            affectedPlayer.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, nauseaDuration, 7));
+                        }
+
+                        if (darknessDuration > 0) {
+                            affectedPlayer.addPotionEffect(new PotionEffect(PotionEffectType.DARKNESS, darknessDuration, 0));
+                        }
+                    }
+                });
     }
 
     @Override
@@ -133,6 +162,16 @@ public class SonicBoom extends AirAbility implements AddonAbility {
     }
 
     @Override
+    public String getDescription() {
+        return ConfigManager.languageConfig.get().getString("Abilities.Air.SonicBoom.Description", "Missing Description. Check PK's lang.yml.");
+    }
+
+    @Override
+    public String getInstructions() {
+        return ConfigManager.languageConfig.get().getString("Abilities.Air.SonicBoom.Instructions", "Missing Instructions. Check PK's lang.yml.");
+    }
+
+    @Override
     public Location getLocation() {
         return origin;
     }
@@ -140,11 +179,17 @@ public class SonicBoom extends AirAbility implements AddonAbility {
     @Override
     public void load() {
         ProjectKorra.plugin.getServer().getPluginManager().registerEvents(new SonicBoomListener(), ProjectKorra.plugin);
-        ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.Cooldown", 10000);
-        ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.Damage", 10.0);
+
+        ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.Cooldown", 11000);
+        ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.Damage", 7.0);
+        ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.DarknessTicks", 80);
+        ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.EntityCollisionRadius", 1.0);
+        ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.KnockbackStrength", 3.5);
+        ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.NauseaTicks",  140);
         ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.Range", 32);
-        ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.TravelSpeed", 2.0);
-        ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.WarmupTicks", 20);
+        ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.SwapWhileCharging", false);
+        ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.TravelSpeed", 3.0);
+        ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.WarmupTicks", 40);
 
         ConfigManager.defaultConfig.save();
 
@@ -165,7 +210,7 @@ public class SonicBoom extends AirAbility implements AddonAbility {
 
     @Override
     public String getVersion() {
-        return "0.0.2";
+        return "1.0.0";
     }
 
     @Override

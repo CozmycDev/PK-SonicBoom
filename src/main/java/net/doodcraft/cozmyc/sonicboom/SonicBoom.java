@@ -63,45 +63,43 @@ public class SonicBoom extends AirAbility implements AddonAbility {
 
     @Override
     public void progress() {
+        if (!player.isSneaking()) {
+            remove();
+            return;
+        }
+
         if (!isWarmedup) {
-            if (!player.isSneaking()) {
-                remove();
-                return;
-            }
-
-            warmupTicks--;
-
-            player.getWorld().playSound(player.getLocation(), Sound.ENTITY_WARDEN_SONIC_CHARGE, 1.0f, 1.0f);
-
-            if (warmupTicks <= 0) {
+            if (--warmupTicks <= 0) {
                 isWarmedup = true;
-                this.origin = player.getEyeLocation();
-                this.direction = player.getLocation().getDirection();
-                player.getWorld().playSound(player.getLocation(), Sound.ENTITY_WARDEN_SONIC_BOOM, 1.0f, 1.0f);
+                origin = player.getEyeLocation();
+                direction = player.getLocation().getDirection();
+                player.getWorld().playSound(player.getLocation(), Sound.ENTITY_WARDEN_SONIC_BOOM, 1.2f, 1.0f);
+            } else {
+                player.getWorld().playSound(player.getLocation(), Sound.ENTITY_WARDEN_SONIC_CHARGE, 1.2f, 1.0f);
             }
             return;
         }
 
         currentDistance += travelSpeed;
-
         if (currentDistance >= maxDistance) {
             remove();
             return;
         }
 
         Location particleLocation = origin.clone().add(direction.clone().multiply(currentDistance));
+        player.getWorld().spawnParticle(Particle.SONIC_BOOM, particleLocation, 1, 0.0, 0.0, 0.0, 0.01, null, true);
+        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_GHAST_SHOOT, 0.5f, 0.2f);
 
-        player.getWorld().spawnParticle(
-                Particle.SONIC_BOOM, particleLocation, 1, 0.0, 0.0, 0.0, 0.01, null, true
-        );
+        GeneralMethods.getEntitiesAroundPoint(particleLocation, 1).stream()
+                .filter(entity -> !(entity instanceof Player) && entity.getUniqueId() != player.getUniqueId())
+                .filter(entity -> entity instanceof LivingEntity)
+                .forEach(entity -> DamageHandler.damageEntity(entity, player, damage, this, false));
+    }
 
-        for (Entity entity : GeneralMethods.getEntitiesAroundPoint(particleLocation, 1)) {
-            if (entity instanceof Player) continue;
-            if (entity.getUniqueId() == player.getUniqueId()) continue;
-            if (entity instanceof LivingEntity) {
-                DamageHandler.damageEntity(entity, player, damage, this, false);
-            }
-        }
+    @Override
+    public void remove() {
+        bPlayer.addCooldown(this);
+        super.remove();
     }
 
     @Override
@@ -147,6 +145,14 @@ public class SonicBoom extends AirAbility implements AddonAbility {
         ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.Range", 32);
         ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.TravelSpeed", 2.0);
         ConfigManager.defaultConfig.get().addDefault("ExtraAbilities.Cozmyc.SonicBoom.WarmupTicks", 20);
+
+        ConfigManager.defaultConfig.save();
+
+        ConfigManager.languageConfig.get().addDefault("Abilities.Air.SonicBoom.DeathMessage", "{victim} was obliterated by {attacker}'s {ability}");
+        ConfigManager.languageConfig.get().addDefault("Abilities.Air.SonicBoom.Description", "Amplify your voice into a beam of pure and devastating air pressure.");
+        ConfigManager.languageConfig.get().addDefault("Abilities.Air.SonicBoom.Instructions", "Hold shift while aiming at your target.");
+
+        ConfigManager.languageConfig.save();
     }
 
     @Override
@@ -159,7 +165,7 @@ public class SonicBoom extends AirAbility implements AddonAbility {
 
     @Override
     public String getVersion() {
-        return "0.0.1";
+        return "0.0.2";
     }
 
     @Override
